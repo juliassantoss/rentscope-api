@@ -13,7 +13,11 @@ dependencies = [
     "psycopg[binary] (>=3.3.3,<4.0.0)",
     "python-dotenv (>=1.2.1,<2.0.0)",
     "pandas (>=3.0.1,<4.0.0)",
-    "pydantic-settings (>=2.13.1,<3.0.0)"
+    "pydantic-settings (>=2.13.1,<3.0.0)",
+    "pyjwt (>=2.12.1,<3.0.0)",
+    "passlib (>=1.7.4,<2.0.0)",
+    "bcrypt (>=5.0.0,<6.0.0)",
+    "email-validator (>=2.3.0,<3.0.0)"
 ]
 
 

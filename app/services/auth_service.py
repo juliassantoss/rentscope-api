@@ -5,6 +5,7 @@ from app.core.security import hash_password, verify_password
 from app.core.jwt import create_access_token, create_refresh_token, decode_token
 from app.services.verification_service import create_email_verification_token
 from app.services.email_service import send_verification_email
+from app.settings import settings
 
 
 def register_user(email: str, password: str):
@@ -25,7 +26,7 @@ def register_user(email: str, password: str):
                 conn.commit()
 
         token = create_email_verification_token(user["id"])
-        verification_link = f"http://127.0.0.1:8000/auth/verify-email?token={token}"
+        verification_link = f"{settings.backend_base_url}/auth/verify-email?token={token}"
         send_verification_email(user["email"], verification_link)
 
         return user

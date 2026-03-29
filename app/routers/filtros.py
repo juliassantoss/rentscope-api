@@ -6,8 +6,7 @@ router = APIRouter(prefix="/filtros", tags=["filtros"])
 
 
 class FiltroIn(BaseModel):
-    usuario_id: str = Field(...,
-                            description="UUID do utilizador (temporário, depois vem do JWT)")
+    usuario_id: str = Field(..., description="UUID do utilizador (temporário, depois vem do JWT)")
     codigo_pais: str = "PT"
 
     preco_m2: float | None = None
@@ -96,7 +95,7 @@ def aplicar_filtros(body: ScoreFiltroIn):
                 e.valor,
                 row_number() over (
                     partition by e.codigo_municipio
-                    order by cast(e.ano as int) desc
+                    order by cast(split_part(e.ano, '/', 1) as int) desc
                 ) as rn
             from public.escolas e
         ),

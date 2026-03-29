@@ -32,7 +32,7 @@ def listar_cidades(
                 e.valor,
                 row_number() over (
                     partition by e.codigo_municipio
-                    order by cast(e.ano as int) desc
+                    order by cast(split_part(e.ano, '/', 1) as int) desc
                 ) as rn
             from public.escolas e
         )

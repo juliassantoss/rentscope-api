@@ -6,7 +6,8 @@ router = APIRouter(prefix="/filtros", tags=["filtros"])
 
 
 class FiltroIn(BaseModel):
-    usuario_id: str = Field(..., description="UUID do utilizador (temporário, depois vem do JWT)")
+    usuario_id: str = Field(...,
+                            description="UUID do utilizador (temporário, depois vem do JWT)")
     codigo_pais: str = "PT"
 
     preco_m2: float | None = None
@@ -18,6 +19,18 @@ class FiltroIn(BaseModel):
     quer_bibliotecas: bool = False
     quer_hospitais: bool = False
     quer_escolas: bool = False
+
+
+class ScoreFiltroIn(BaseModel):
+    busca: str | None = None
+    renda_min: float | None = None
+    renda_max: float | None = None
+
+    peso_escolas: float = 1.0
+    peso_hospitais: float = 1.0
+    peso_criminalidade: float = 1.0
+
+    limite: int = 200
 
 
 @router.post("/salvar")
@@ -50,3 +63,155 @@ def salvar_filtro(body: FiltroIn):
             row = cur.fetchone()
         conn.commit()
         return row
+
+
+@router.post("/aplicar")
+def aplicar_filtros(body: ScoreFiltroIn):
+    peso_escolas = max(body.peso_escolas, 0.0)
+    peso_hospitais = max(body.peso_hospitais, 0.0)
+    peso_criminalidade = max(body.peso_criminalidade, 0.0)
+
+    soma_pesos = peso_escolas + peso_hospitais + peso_criminalidade
+    if soma_pesos == 0:
+        soma_pesos = 1.0
+
+    sql = """
+        with latest_renda as (
+            select
+                r.codigo_municipio,
+                r.trimestre,
+                r.valor_medio_m2,
+                row_number() over (
+                    partition by r.codigo_municipio
+                    order by
+                        cast(substring(r.trimestre from '(\\d{4})') as int) desc,
+                        cast(substring(r.trimestre from '^(\\d)') as int) desc
+                ) as rn
+            from public.renda r
+        ),
+        latest_escolas as (
+            select
+                e.codigo_municipio,
+                e.ano,
+                e.valor,
+                row_number() over (
+                    partition by e.codigo_municipio
+                    order by cast(e.ano as int) desc
+                ) as rn
+            from public.escolas e
+        ),
+        base as (
+            select
+                m.codigo_municipio,
+                m.municipio_localidade,
+                m.regiao,
+                m.grande_regiao,
+                lr.trimestre as renda_trimestre,
+                lr.valor_medio_m2,
+                coalesce(le.valor, 0) as total_escolas,
+                coalesce(h.hospitais_2024, 0) as total_hospitais,
+                coalesce(c.crimes_2024, 0) as total_crimes
+            from public.municipios m
+            left join latest_renda lr
+                on lr.codigo_municipio = m.codigo_municipio
+               and lr.rn = 1
+            left join latest_escolas le
+                on le.codigo_municipio = m.codigo_municipio
+               and le.rn = 1
+            left join public.hospitais h
+                on h.codigo_municipio = m.codigo_municipio
+            left join public.criminalidade c
+                on c.codigo_municipio = m.codigo_municipio
+            where 1 = 1
+        ),
+        filtrado as (
+            select *
+            from base
+            where 1 = 1
+        ),
+        normalizado as (
+            select
+                *,
+                min(total_escolas) over () as min_escolas,
+                max(total_escolas) over () as max_escolas,
+                min(total_hospitais) over () as min_hospitais,
+                max(total_hospitais) over () as max_hospitais,
+                min(total_crimes) over () as min_crimes,
+                max(total_crimes) over () as max_crimes
+            from filtrado
+        ),
+        scoreado as (
+            select
+                codigo_municipio,
+                municipio_localidade,
+                regiao,
+                grande_regiao,
+                renda_trimestre,
+                valor_medio_m2,
+                total_escolas,
+                total_hospitais,
+                total_crimes,
+                case
+                    when max_escolas = min_escolas then 1.0
+                    else (total_escolas - min_escolas)::float / nullif(max_escolas - min_escolas, 0)
+                end as score_escolas,
+                case
+                    when max_hospitais = min_hospitais then 1.0
+                    else (total_hospitais - min_hospitais)::float / nullif(max_hospitais - min_hospitais, 0)
+                end as score_hospitais,
+                case
+                    when max_crimes = min_crimes then 1.0
+                    else 1.0 - ((total_crimes - min_crimes)::float / nullif(max_crimes - min_crimes, 0))
+                end as score_criminalidade
+            from normalizado
+        )
+        select
+            codigo_municipio,
+            municipio_localidade,
+            regiao,
+            grande_regiao,
+            renda_trimestre,
+            valor_medio_m2,
+            total_escolas,
+            total_hospitais,
+            total_crimes,
+            score_escolas,
+            score_hospitais,
+            score_criminalidade,
+            (
+                (
+                    score_escolas * %s +
+                    score_hospitais * %s +
+                    score_criminalidade * %s
+                ) / %s
+            ) as score
+        from scoreado
+        where 1 = 1
+    """
+
+    params = [
+        peso_escolas,
+        peso_hospitais,
+        peso_criminalidade,
+        soma_pesos,
+    ]
+
+    if body.busca:
+        sql += " and municipio_localidade ilike %s"
+        params.append(f"%{body.busca}%")
+
+    if body.renda_min is not None:
+        sql += " and valor_medio_m2 >= %s"
+        params.append(body.renda_min)
+
+    if body.renda_max is not None:
+        sql += " and valor_medio_m2 <= %s"
+        params.append(body.renda_max)
+
+    sql += " order by score desc, municipio_localidade asc limit %s"
+    params.append(body.limite)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()

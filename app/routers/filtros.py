@@ -1,3 +1,4 @@
+from math import isfinite
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from app.db import get_conn
@@ -6,7 +7,8 @@ router = APIRouter(prefix="/filtros", tags=["filtros"])
 
 
 class FiltroIn(BaseModel):
-    usuario_id: str = Field(..., description="UUID do utilizador (temporário, depois vem do JWT)")
+    usuario_id: str = Field(...,
+                            description="UUID do utilizador (temporário, depois vem do JWT)")
     codigo_pais: str = "PT"
 
     preco_m2: float | None = None
@@ -22,14 +24,16 @@ class FiltroIn(BaseModel):
 
 class ScoreFiltroIn(BaseModel):
     busca: str | None = None
+
     renda_min: float | None = None
     renda_max: float | None = None
 
+    peso_renda: float = 1.0
     peso_escolas: float = 1.0
     peso_hospitais: float = 1.0
     peso_criminalidade: float = 1.0
 
-    limite: int = 200
+    limite: int = 400
 
 
 @router.post("/salvar")
@@ -66,11 +70,12 @@ def salvar_filtro(body: FiltroIn):
 
 @router.post("/aplicar")
 def aplicar_filtros(body: ScoreFiltroIn):
+    peso_renda = max(body.peso_renda, 0.0)
     peso_escolas = max(body.peso_escolas, 0.0)
     peso_hospitais = max(body.peso_hospitais, 0.0)
     peso_criminalidade = max(body.peso_criminalidade, 0.0)
 
-    soma_pesos = peso_escolas + peso_hospitais + peso_criminalidade
+    soma_pesos = peso_renda + peso_escolas + peso_hospitais + peso_criminalidade
     if soma_pesos == 0:
         soma_pesos = 1.0
 
@@ -123,21 +128,30 @@ def aplicar_filtros(body: ScoreFiltroIn):
                 on c.codigo_municipio = m.codigo_municipio
             where 1 = 1
         ),
-        filtrado as (
+        buscado as (
             select *
             from base
             where 1 = 1
         ),
+        enriquecido as (
+            select
+                *,
+                ln(1 + total_escolas) as escolas_suave,
+                ln(1 + total_hospitais) as hospitais_suave
+            from buscado
+        ),
         normalizado as (
             select
                 *,
-                min(total_escolas) over () as min_escolas,
-                max(total_escolas) over () as max_escolas,
-                min(total_hospitais) over () as min_hospitais,
-                max(total_hospitais) over () as max_hospitais,
+                min(escolas_suave) over () as min_escolas_suave,
+                max(escolas_suave) over () as max_escolas_suave,
+                min(hospitais_suave) over () as min_hospitais_suave,
+                max(hospitais_suave) over () as max_hospitais_suave,
                 min(total_crimes) over () as min_crimes,
-                max(total_crimes) over () as max_crimes
-            from filtrado
+                max(total_crimes) over () as max_crimes,
+                min(valor_medio_m2) over () as min_renda_data,
+                max(valor_medio_m2) over () as max_renda_data
+            from enriquecido
         ),
         scoreado as (
             select
@@ -150,18 +164,53 @@ def aplicar_filtros(body: ScoreFiltroIn):
                 total_escolas,
                 total_hospitais,
                 total_crimes,
+
                 case
-                    when max_escolas = min_escolas then 1.0
-                    else (total_escolas - min_escolas)::float / nullif(max_escolas - min_escolas, 0)
+                    when max_escolas_suave = min_escolas_suave then 1.0
+                    else (escolas_suave - min_escolas_suave) / nullif(max_escolas_suave - min_escolas_suave, 0)
                 end as score_escolas,
+
                 case
-                    when max_hospitais = min_hospitais then 1.0
-                    else (total_hospitais - min_hospitais)::float / nullif(max_hospitais - min_hospitais, 0)
+                    when max_hospitais_suave = min_hospitais_suave then 1.0
+                    else (hospitais_suave - min_hospitais_suave) / nullif(max_hospitais_suave - min_hospitais_suave, 0)
                 end as score_hospitais,
+
                 case
                     when max_crimes = min_crimes then 1.0
                     else 1.0 - ((total_crimes - min_crimes)::float / nullif(max_crimes - min_crimes, 0))
-                end as score_criminalidade
+                end as score_criminalidade,
+
+                case
+                    when %s is null and %s is null then 1.0
+
+                    when %s is not null and %s is not null and valor_medio_m2 between %s and %s then 1.0
+
+                    when %s is not null and %s is not null then
+                        greatest(
+                            0.0,
+                            1.0 - (
+                                case
+                                    when valor_medio_m2 < %s then (%s - valor_medio_m2)
+                                    when valor_medio_m2 > %s then (valor_medio_m2 - %s)
+                                    else 0.0
+                                end
+                            ) / nullif(greatest(%s - min_renda_data, max_renda_data - %s, 1.0), 0)
+                        )
+
+                    when %s is not null then
+                        greatest(
+                            0.0,
+                            1.0 - abs(valor_medio_m2 - %s) / nullif(greatest(max_renda_data - min_renda_data, 1.0), 0)
+                        )
+
+                    when %s is not null then
+                        greatest(
+                            0.0,
+                            1.0 - abs(valor_medio_m2 - %s) / nullif(greatest(max_renda_data - min_renda_data, 1.0), 0)
+                        )
+
+                    else 1.0
+                end as score_renda
             from normalizado
         )
         select
@@ -174,11 +223,13 @@ def aplicar_filtros(body: ScoreFiltroIn):
             total_escolas,
             total_hospitais,
             total_crimes,
+            score_renda,
             score_escolas,
             score_hospitais,
             score_criminalidade,
             (
                 (
+                    score_renda * %s +
                     score_escolas * %s +
                     score_hospitais * %s +
                     score_criminalidade * %s
@@ -189,6 +240,30 @@ def aplicar_filtros(body: ScoreFiltroIn):
     """
 
     params = [
+        body.renda_min,
+        body.renda_max,
+
+        body.renda_min,
+        body.renda_max,
+        body.renda_min,
+        body.renda_max,
+
+        body.renda_min,
+        body.renda_max,
+        body.renda_min,
+        body.renda_min,
+        body.renda_max,
+        body.renda_max,
+        body.renda_min if body.renda_min is not None else 0.0,
+        body.renda_max if body.renda_max is not None else 0.0,
+
+        body.renda_min,
+        body.renda_min if body.renda_min is not None else 0.0,
+
+        body.renda_max,
+        body.renda_max if body.renda_max is not None else 0.0,
+
+        peso_renda,
         peso_escolas,
         peso_hospitais,
         peso_criminalidade,
@@ -198,14 +273,6 @@ def aplicar_filtros(body: ScoreFiltroIn):
     if body.busca:
         sql += " and municipio_localidade ilike %s"
         params.append(f"%{body.busca}%")
-
-    if body.renda_min is not None:
-        sql += " and valor_medio_m2 >= %s"
-        params.append(body.renda_min)
-
-    if body.renda_max is not None:
-        sql += " and valor_medio_m2 <= %s"
-        params.append(body.renda_max)
 
     sql += " order by score desc, municipio_localidade asc limit %s"
     params.append(body.limite)

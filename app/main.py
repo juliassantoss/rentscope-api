@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routers import paises, cidades, filtros, auth
+from app.routers import paises, cidades, filtros, auth, history
 
 app = FastAPI(title="RentScope API")
 
@@ -7,6 +7,7 @@ app.include_router(paises.router)
 app.include_router(cidades.router)
 app.include_router(filtros.router)
 app.include_router(auth.router)
+app.include_router(history.router)
 
 
 @app.get("/health")

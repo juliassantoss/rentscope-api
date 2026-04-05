@@ -9,6 +9,7 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+
 class AiQuestionRequest(BaseModel):
     pais: str
     municipio: Optional[str] = None
@@ -19,8 +20,10 @@ class AiQuestionRequest(BaseModel):
     criminalidade: Optional[float] = None
     score: Optional[float] = None
 
+
 class AiQuestionResponse(BaseModel):
     resposta: str
+
 
 @router.post("/pergunta", response_model=AiQuestionResponse)
 def perguntar_ia(payload: AiQuestionRequest):
@@ -40,7 +43,7 @@ Dados disponíveis do local:
 - criminalidade: {payload.criminalidade}
 """
 
-instrucoes = """
+    instrucoes = """
 Tu és o assistente inteligente do app RentScope.
 
 REGRAS:

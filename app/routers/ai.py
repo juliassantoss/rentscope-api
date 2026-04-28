@@ -14,7 +14,7 @@ class AiQuestionRequest(BaseModel):
     pais: str
     municipio: Optional[str] = None
     pergunta: str
-    idioma_app: str = "pt"
+    idioma_app: str
     renda_min: Optional[float] = None
     renda_max: Optional[float] = None
     peso_renda: Optional[float] = None

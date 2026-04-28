@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+﻿from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -37,12 +37,120 @@ def register(data: RegisterRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/verify-email", response_model=UserResponse)
+@router.get("/verify-email", response_class=HTMLResponse)
 def verify_email(token: str):
     try:
-        return verify_email_token(token)
+        user = verify_email_token(token)
+        return HTMLResponse(
+            content=f"""
+            <!doctype html>
+            <html lang="pt">
+              <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>E-mail verificado - RentScope</title>
+                <style>
+                  body {{
+                    margin: 0;
+                    font-family: Arial, sans-serif;
+                    background: #eaf1f4;
+                    color: #17202a;
+                  }}
+                  main {{
+                    max-width: 420px;
+                    margin: 48px auto;
+                    padding: 24px;
+                  }}
+                  .card {{
+                    background: white;
+                    border-radius: 18px;
+                    padding: 22px;
+                    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+                  }}
+                  h1 {{
+                    margin: 0 0 10px;
+                    font-size: 24px;
+                  }}
+                  p {{
+                    color: #475569;
+                    line-height: 1.45;
+                    margin: 0;
+                  }}
+                  .success {{
+                    color: #166534;
+                    font-weight: 700;
+                    margin-bottom: 10px;
+                  }}
+                </style>
+              </head>
+              <body>
+                <main>
+                  <section class="card">
+                    <p class="success">Seu e-mail est&aacute; verificado.</p>
+                    <h1>Verifica&ccedil;&atilde;o conclu&iacute;da</h1>
+                    <p>O e-mail {user.email} foi confirmado e j&aacute; pode iniciar sess&atilde;o no RentScope.</p>
+                  </section>
+                </main>
+              </body>
+            </html>
+            """
+        )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return HTMLResponse(
+            status_code=400,
+            content=f"""
+            <!doctype html>
+            <html lang="pt">
+              <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>Erro de verificacao - RentScope</title>
+                <style>
+                  body {{
+                    margin: 0;
+                    font-family: Arial, sans-serif;
+                    background: #eaf1f4;
+                    color: #17202a;
+                  }}
+                  main {{
+                    max-width: 420px;
+                    margin: 48px auto;
+                    padding: 24px;
+                  }}
+                  .card {{
+                    background: white;
+                    border-radius: 18px;
+                    padding: 22px;
+                    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+                  }}
+                  h1 {{
+                    margin: 0 0 10px;
+                    font-size: 24px;
+                  }}
+                  p {{
+                    color: #475569;
+                    line-height: 1.45;
+                    margin: 0;
+                  }}
+                  .error {{
+                    color: #b91c1c;
+                    font-weight: 700;
+                    margin-bottom: 10px;
+                  }}
+                </style>
+              </head>
+              <body>
+                <main>
+                  <section class="card">
+                    <p class="error">Nao foi possivel verificar o e-mail.</p>
+                    <h1>Link invalido</h1>
+                    <p>{str(e)}</p>
+                  </section>
+                </main>
+              </body>
+            </html>
+            """
+        )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -173,7 +281,7 @@ def reset_password_page(token: str):
               message.textContent = data.message || "Senha atualizada com sucesso.";
             }} else {{
               message.style.color = "#b91c1c";
-              message.textContent = data.detail || "Não foi possível atualizar a senha.";
+              message.textContent = data.detail || "NÃ£o foi possÃ­vel atualizar a senha.";
             }}
           }}
         </script>
@@ -198,3 +306,4 @@ def refresh(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
         return refresh_tokens(refresh_token)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
+

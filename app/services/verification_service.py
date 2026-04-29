@@ -23,13 +23,30 @@ def create_email_verification_token(user_id: int) -> str:
 
 
 def verify_email_token(token: str):
+    """
+    Verifica um token de email.
+
+    Idempotente: pode ser chamado várias vezes com o mesmo token enquanto este
+    estiver válido (até `expires_at`). Cliques múltiplos — feitos pelo
+    utilizador ou por scanners de email (Gmail, Outlook, etc.) que pré-acedem
+    aos links — continuam a devolver sucesso em vez de "Token inválido".
+
+    O token só é removido depois de expirar (limpeza pode ser feita por um job).
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, user_id, token, expires_at
-                FROM email_verification_tokens
-                WHERE token = %s
+                SELECT t.id AS token_id,
+                       t.user_id,
+                       t.token,
+                       t.expires_at,
+                       u.id AS user_id_check,
+                       u.email,
+                       u.is_verified
+                FROM email_verification_tokens t
+                JOIN users u ON u.id = t.user_id
+                WHERE t.token = %s
                 """,
                 (token,)
             )
@@ -40,6 +57,14 @@ def verify_email_token(token: str):
 
             if token_row["expires_at"] < datetime.utcnow():
                 raise ValueError("Token de verificação expirado.")
+
+            # Já verificado: idempotência — devolvemos os dados sem tocar na BD.
+            if token_row["is_verified"]:
+                return {
+                    "id": token_row["user_id"],
+                    "email": token_row["email"],
+                    "is_verified": True,
+                }
 
             cur.execute(
                 """
@@ -52,13 +77,29 @@ def verify_email_token(token: str):
             )
             user = cur.fetchone()
 
+            # Não apagamos o token aqui de propósito: queremos suportar cliques
+            # múltiplos (utilizador + scanners de email) enquanto o token for
+            # válido. Tokens expirados podem ser removidos por um job periódico.
+            conn.commit()
+            return user
+
+
+def cleanup_expired_email_verification_tokens() -> int:
+    """
+    Remove tokens de verificação de email que já expiraram.
+
+    Pode ser chamado por um job periódico (ex.: cron, scheduler do Render).
+    Devolve o número de tokens removidos.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
             cur.execute(
                 """
                 DELETE FROM email_verification_tokens
-                WHERE id = %s
+                WHERE expires_at < %s
                 """,
-                (token_row["id"],)
+                (datetime.utcnow(),)
             )
-
+            removed = cur.rowcount
             conn.commit()
-            return user
+            return removed

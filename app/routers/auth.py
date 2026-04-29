@@ -88,7 +88,7 @@ def verify_email(token: str):
                   <section class="card">
                     <p class="success">Seu e-mail est&aacute; verificado.</p>
                     <h1>Verifica&ccedil;&atilde;o conclu&iacute;da</h1>
-                    <p>O e-mail {user.email} foi confirmado e j&aacute; pode iniciar sess&atilde;o no RentScope.</p>
+                    <p>O e-mail {user["email"]} foi confirmado e j&aacute; pode iniciar sess&atilde;o no RentScope.</p>
                   </section>
                 </main>
               </body>

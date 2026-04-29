@@ -20,9 +20,11 @@ def send_verification_email(email: str, verification_link: str) -> None:
                    Verificar email
                 </a>
             </p>
-            <p>Se preferir, pode também copiar e colar este link no navegador:</p>
-            <p>{verification_link}</p>
-            <p>Este link expira em 24 horas.</p>
+            <p style="font-size: 12px; color: #666;">
+                Se o botão não funcionar, copie e cole o seguinte endereço no navegador:<br>
+                <span style="word-break: break-all;">{verification_link}</span>
+            </p>
+            <p style="font-size: 12px; color: #666;">Este link expira em 24 horas.</p>
         </body>
     </html>
     """

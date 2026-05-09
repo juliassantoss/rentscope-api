@@ -13,13 +13,20 @@ GENERIC_RESET_MESSAGE = (
 
 
 def ensure_password_reset_table() -> None:
+    """
+    Garante que a tabela `password_reset_tokens` existe.
+
+    Importante: `user_id` tem de ser INTEGER (igual a `users.id`).
+    Usar BIGINT aqui causa erro de type mismatch no FK e a tabela
+    nunca chega a ser criada — o que partia o fluxo de reset de senha.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS password_reset_tokens (
                     id BIGSERIAL PRIMARY KEY,
-                    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     token TEXT NOT NULL UNIQUE,
                     expires_at TIMESTAMPTZ NOT NULL,
                     used_at TIMESTAMPTZ,

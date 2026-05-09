@@ -63,14 +63,11 @@ def salvar_filtro(
 def listar_filtros(current_user=Depends(get_current_user)):
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Os filtros_salvos passaram a ser apenas histórico de pesquisas.
+            # Favoritos são por município (tabela `favoritos`), não por filtro.
             cur.execute("""
-                select
-                    fs.*,
-                    case when f.id is not null then true else false end as favorito
+                select fs.*, false as favorito
                 from filtros_salvos fs
-                left join favoritos f
-                  on f.filtro_id = fs.id
-                 and f.usuario_id = fs.usuario_id
                 where fs.usuario_id = %s
                 order by fs.criado_em desc
             """, (current_user["id"],))
@@ -98,15 +95,24 @@ def adicionar_favorito(
     body: dict,
     current_user=Depends(get_current_user)
 ):
+    """
+    Marca um município como favorito do utilizador autenticado.
+
+    Body esperado: {"codigo_municipio": <int>}
+    """
+    codigo_municipio = body.get("codigo_municipio")
+    if codigo_municipio is None:
+        raise HTTPException(status_code=400, detail="codigo_municipio em falta.")
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                insert into favoritos (usuario_id, filtro_id)
-                values (%s,%s)
-                on conflict do nothing
+                insert into public.favoritos (usuario_id, codigo_municipio)
+                values (%s, %s)
+                on conflict (usuario_id, codigo_municipio) do nothing
             """, (
                 current_user["id"],
-                body["filtro_id"]
+                codigo_municipio
             ))
         conn.commit()
 
@@ -116,12 +122,23 @@ def adicionar_favorito(
 
 @router.get("/favoritos")
 def listar_favoritos(current_user=Depends(get_current_user)):
+    """
+    Devolve a lista de municípios favoritos do utilizador, com os dados
+    necessários para mostrar diretamente nos cartões de cidade.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                select fs.*, true as favorito
-                from favoritos f
-                join filtros_salvos fs on fs.id = f.filtro_id
+                select
+                    f.id              as favorito_id,
+                    f.criado_em       as favoritado_em,
+                    m.codigo_municipio,
+                    m.municipio_localidade,
+                    m.regiao,
+                    m.grande_regiao
+                from public.favoritos f
+                join public.municipios m
+                    on m.codigo_municipio = f.codigo_municipio
                 where f.usuario_id = %s
                 order by f.criado_em desc
             """, (current_user["id"],))
@@ -130,14 +147,17 @@ def listar_favoritos(current_user=Depends(get_current_user)):
 
 
 
-@router.delete("/favoritos/{filtro_id}")
-def remover_favorito(filtro_id: str, current_user=Depends(get_current_user)):
+@router.delete("/favoritos/{codigo_municipio}")
+def remover_favorito(
+    codigo_municipio: int,
+    current_user=Depends(get_current_user)
+):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                delete from favoritos
-                where usuario_id = %s and filtro_id = %s
-            """, (current_user["id"], filtro_id))
+                delete from public.favoritos
+                where usuario_id = %s and codigo_municipio = %s
+            """, (current_user["id"], codigo_municipio))
         conn.commit()
 
     return {"ok": True}

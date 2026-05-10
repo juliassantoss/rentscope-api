@@ -175,6 +175,14 @@ def reset_password_route(data: ResetPasswordRequest):
         return reset_password(data.token, data.new_password)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Garante que erros inesperados (problemas de BD, etc.) saem como JSON
+        # com uma mensagem identificável, em vez de 500 com HTML — assim o
+        # frontend consegue mostrar algo útil ao utilizador.
+        raise HTTPException(
+            status_code=500,
+            detail=f"Falha ao atualizar a senha: {type(e).__name__}: {e}"
+        )
 
 
 @router.get("/reset-password", response_class=HTMLResponse)
@@ -217,15 +225,33 @@ def reset_password_page(token: str):
             margin: 18px 0 6px;
             font-weight: 700;
           }}
+          .input-wrapper {{
+            position: relative;
+          }}
           input {{
             width: 100%;
             box-sizing: border-box;
             border: 1px solid #cbd5e1;
             border-radius: 12px;
-            padding: 12px;
+            padding: 12px 44px 12px 12px;
             font-size: 16px;
           }}
-          button {{
+          .toggle-visibility {{
+            position: absolute;
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: transparent;
+            border: 0;
+            padding: 6px;
+            margin: 0;
+            width: auto;
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 1;
+            color: #475569;
+          }}
+          button.primary {{
             width: 100%;
             margin-top: 18px;
             border: 0;
@@ -235,6 +261,11 @@ def reset_password_page(token: str):
             color: white;
             font-weight: 700;
             font-size: 15px;
+            cursor: pointer;
+          }}
+          button.primary[disabled] {{
+            opacity: 0.6;
+            cursor: not-allowed;
           }}
           #message {{
             margin-top: 14px;
@@ -246,42 +277,76 @@ def reset_password_page(token: str):
         <main>
           <section class="card">
             <h1>Recuperar senha</h1>
-            <p>Digite uma nova senha para sua conta RentScope.</p>
+            <p>Digite uma nova senha para a sua conta RentScope.</p>
             <label for="password">Nova senha</label>
-            <input id="password" type="password" minlength="6" autocomplete="new-password" />
-            <button onclick="resetPassword()">Atualizar senha</button>
+            <div class="input-wrapper">
+              <input id="password" type="password" minlength="6" autocomplete="new-password" />
+              <button type="button" class="toggle-visibility" id="toggle" aria-label="Mostrar/ocultar senha">&#128065;</button>
+            </div>
+            <button class="primary" id="submit">Atualizar senha</button>
             <p id="message"></p>
           </section>
         </main>
         <script>
+          const passwordInput = document.getElementById("password");
+          const toggleBtn = document.getElementById("toggle");
+          const submitBtn = document.getElementById("submit");
+          const messageEl = document.getElementById("message");
+
+          toggleBtn.addEventListener("click", () => {{
+            passwordInput.type = passwordInput.type === "password" ? "text" : "password";
+          }});
+
+          submitBtn.addEventListener("click", resetPassword);
+
           async function resetPassword() {{
-            const message = document.getElementById("message");
-            const password = document.getElementById("password").value;
-            message.textContent = "";
+            messageEl.textContent = "";
+            const password = passwordInput.value;
 
             if (!password || password.length < 6) {{
-              message.style.color = "#b91c1c";
-              message.textContent = "A senha deve ter pelo menos 6 caracteres.";
+              messageEl.style.color = "#b91c1c";
+              messageEl.textContent = "A senha deve ter pelo menos 6 caracteres.";
               return;
             }}
 
-            const response = await fetch("/auth/reset-password", {{
-              method: "POST",
-              headers: {{ "Content-Type": "application/json" }},
-              body: JSON.stringify({{
-                token: "{token}",
-                new_password: password
-              }})
-            }});
+            submitBtn.disabled = true;
 
-            const data = await response.json().catch(() => ({{ detail: "Erro inesperado." }}));
+            try {{
+              const response = await fetch("/auth/reset-password", {{
+                method: "POST",
+                headers: {{ "Content-Type": "application/json" }},
+                body: JSON.stringify({{
+                  token: "{token}",
+                  new_password: password
+                }})
+              }});
 
-            if (response.ok) {{
-              message.style.color = "#166534";
-              message.textContent = data.message || "Senha atualizada com sucesso.";
-            }} else {{
-              message.style.color = "#b91c1c";
-              message.textContent = data.detail || "NÃ£o foi possÃ­vel atualizar a senha.";
+              const rawText = await response.text();
+              let data = null;
+              try {{
+                data = rawText ? JSON.parse(rawText) : null;
+              }} catch (_) {{
+                data = null;
+              }}
+
+              if (response.ok) {{
+                messageEl.style.color = "#166534";
+                messageEl.textContent = (data && data.message) || "Senha atualizada com sucesso.";
+              }} else {{
+                messageEl.style.color = "#b91c1c";
+                if (data && data.detail) {{
+                  messageEl.textContent = data.detail;
+                }} else if (rawText) {{
+                  messageEl.textContent = "Erro " + response.status + ": " + rawText.substring(0, 240);
+                }} else {{
+                  messageEl.textContent = "Erro " + response.status + " ao atualizar a senha.";
+                }}
+              }}
+            }} catch (err) {{
+              messageEl.style.color = "#b91c1c";
+              messageEl.textContent = "Falha de rede: " + (err && err.message ? err.message : err);
+            }} finally {{
+              submitBtn.disabled = false;
             }}
           }}
         </script>

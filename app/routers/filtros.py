@@ -181,8 +181,22 @@ def aplicar_filtros(body: ScoreFiltroIn):
                 end as score_criminalidade,
 
                 case
-                    when %s is null and %s is null then 1.0
+                    -- Caso novo: sem filtro de min/max. Pontuação inversa
+                    -- normalizada — município mais barato = 1.0, mais caro = 0.0.
+                    -- Município sem dados de renda contribui 0.
+                    when %s is null and %s is null then
+                        case
+                            when valor_medio_m2 is null then 0.0
+                            when max_renda_data is null or min_renda_data is null then 1.0
+                            when max_renda_data = min_renda_data then 1.0
+                            else 1.0 - (
+                                (valor_medio_m2 - min_renda_data)::float
+                                / nullif(max_renda_data - min_renda_data, 0)
+                            )
+                        end
 
+                    -- Caso legacy: histórico antigo guardou min/max. Mantém o
+                    -- comportamento original baseado em intervalo de renda.
                     when %s is not null and %s is not null and valor_medio_m2 between %s and %s then 1.0
 
                     when %s is not null and %s is not null then

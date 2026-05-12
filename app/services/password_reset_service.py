@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.core.security import hash_password
@@ -66,7 +66,7 @@ def request_password_reset(email: str) -> dict:
             )
 
             token = str(uuid4())
-            expires_at = datetime.utcnow() + timedelta(hours=1)
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
             cur.execute(
                 """
@@ -106,7 +106,7 @@ def reset_password(token: str, new_password: str) -> dict:
             if token_row["used_at"] is not None:
                 raise ValueError("Token de recuperação já utilizado.")
 
-            if token_row["expires_at"] < datetime.utcnow():
+            if token_row["expires_at"] < datetime.now(timezone.utc):
                 raise ValueError("Token de recuperação expirado.")
 
             cur.execute(

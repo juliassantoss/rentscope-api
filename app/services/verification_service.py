@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.db import get_conn
@@ -6,7 +6,7 @@ from app.db import get_conn
 
 def create_email_verification_token(user_id: int) -> str:
     token = str(uuid4())
-    expires_at = datetime.utcnow() + timedelta(hours=24)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -55,7 +55,7 @@ def verify_email_token(token: str):
             if not token_row:
                 raise ValueError("Token de verificação inválido.")
 
-            if token_row["expires_at"] < datetime.utcnow():
+            if token_row["expires_at"] < datetime.now(timezone.utc):
                 raise ValueError("Token de verificação expirado.")
 
             # Já verificado: idempotência — devolvemos os dados sem tocar na BD.
@@ -98,7 +98,7 @@ def cleanup_expired_email_verification_tokens() -> int:
                 DELETE FROM email_verification_tokens
                 WHERE expires_at < %s
                 """,
-                (datetime.utcnow(),)
+                (datetime.now(timezone.utc),)
             )
             removed = cur.rowcount
             conn.commit()

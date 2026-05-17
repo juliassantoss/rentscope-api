@@ -1,4 +1,4 @@
-from math import isfinite
+﻿from math import isfinite
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from app.db import get_conn
@@ -8,7 +8,7 @@ router = APIRouter(prefix="/filtros", tags=["filtros"])
 
 class FiltroIn(BaseModel):
     usuario_id: str = Field(...,
-                            description="UUID do utilizador (temporário, depois vem do JWT)")
+                            description="UUID do utilizador (temporÃ¡rio, depois vem do JWT)")
     codigo_pais: str = "PT"
 
     preco_m2: float | None = None
@@ -137,7 +137,8 @@ def aplicar_filtros(body: ScoreFiltroIn):
             select
                 *,
                 ln(1 + total_escolas) as escolas_suave,
-                ln(1 + total_hospitais) as hospitais_suave
+                ln(1 + total_hospitais) as hospitais_suave,
+                ln(1 + total_crimes) as crimes_suave
             from buscado
         ),
         normalizado as (
@@ -147,8 +148,8 @@ def aplicar_filtros(body: ScoreFiltroIn):
                 max(escolas_suave) over () as max_escolas_suave,
                 min(hospitais_suave) over () as min_hospitais_suave,
                 max(hospitais_suave) over () as max_hospitais_suave,
-                min(total_crimes) over () as min_crimes,
-                max(total_crimes) over () as max_crimes,
+                min(crimes_suave) over () as min_crimes_suave,
+                max(crimes_suave) over () as max_crimes_suave,
                 min(valor_medio_m2) over () as min_renda_data,
                 max(valor_medio_m2) over () as max_renda_data
             from enriquecido
@@ -176,14 +177,14 @@ def aplicar_filtros(body: ScoreFiltroIn):
                 end as score_hospitais,
 
                 case
-                    when max_crimes = min_crimes then 1.0
-                    else 1.0 - ((total_crimes - min_crimes)::float / nullif(max_crimes - min_crimes, 0))
+                    when max_crimes_suave = min_crimes_suave then 1.0
+                    else 1.0 - ((crimes_suave - min_crimes_suave)::float / nullif(max_crimes_suave - min_crimes_suave, 0))
                 end as score_criminalidade,
 
                 case
-                    -- Caso novo: sem filtro de min/max. Pontuação inversa
-                    -- normalizada — município mais barato = 1.0, mais caro = 0.0.
-                    -- Município sem dados de renda contribui 0.
+                    -- Caso novo: sem filtro de min/max. PontuaÃ§Ã£o inversa
+                    -- normalizada â€” municÃ­pio mais barato = 1.0, mais caro = 0.0.
+                    -- MunicÃ­pio sem dados de renda contribui 0.
                     when %s is null and %s is null then
                         case
                             when valor_medio_m2 is null then 0.0
@@ -195,7 +196,7 @@ def aplicar_filtros(body: ScoreFiltroIn):
                             )
                         end
 
-                    -- Caso legacy: histórico antigo guardou min/max. Mantém o
+                    -- Caso legacy: histÃ³rico antigo guardou min/max. MantÃ©m o
                     -- comportamento original baseado em intervalo de renda.
                     when %s is not null and %s is not null and valor_medio_m2 between %s and %s then 1.0
 
@@ -295,3 +296,4 @@ def aplicar_filtros(body: ScoreFiltroIn):
         with conn.cursor() as cur:
             cur.execute(sql, params)
             return cur.fetchall()
+

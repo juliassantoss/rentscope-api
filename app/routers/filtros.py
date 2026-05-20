@@ -8,7 +8,7 @@ router = APIRouter(prefix="/filtros", tags=["filtros"])
 
 class FiltroIn(BaseModel):
     usuario_id: str = Field(...,
-                            description="UUID do utilizador (temporÃ¡rio, depois vem do JWT)")
+                            description="UUID do utilizador (temporario, depois vem do JWT)")
     codigo_pais: str = "PT"
 
     preco_m2: float | None = None
@@ -182,9 +182,10 @@ def aplicar_filtros(body: ScoreFiltroIn):
                 end as score_criminalidade,
 
                 case
-                    -- Caso novo: sem filtro de min/max. PontuaÃ§Ã£o inversa
-                    -- normalizada â€” municÃ­pio mais barato = 1.0, mais caro = 0.0.
-                    -- MunicÃ­pio sem dados de renda contribui 0.
+                    -- Caso novo: sem filtro de min/max. Pontuacao inversa
+                    -- normalizada: municipio mais barato = 1.0, mais caro = 0.0.
+                    -- Municipio sem dados de renda contribui 0 (e a dimensao
+                    -- renda e excluida do calculo final no SELECT abaixo).
                     when %s is null and %s is null then
                         case
                             when valor_medio_m2 is null then 0.0
@@ -196,7 +197,7 @@ def aplicar_filtros(body: ScoreFiltroIn):
                             )
                         end
 
-                    -- Caso legacy: histÃ³rico antigo guardou min/max. MantÃ©m o
+                    -- Caso legacy: historico antigo guardou min/max. Mantem o
                     -- comportamento original baseado em intervalo de renda.
                     when %s is not null and %s is not null and valor_medio_m2 between %s and %s then 1.0
 
@@ -244,11 +245,18 @@ def aplicar_filtros(body: ScoreFiltroIn):
             score_criminalidade,
             (
                 (
-                    score_renda * %s +
+                    -- Municípios sem dados de renda não são penalizados: o peso
+                    -- da renda é zerado tanto no numerador como no denominador,
+                    -- avaliando-os apenas pelas dimensões disponíveis.
+                    score_renda * (case when valor_medio_m2 is null then 0.0 else %s end) +
                     score_escolas * %s +
                     score_hospitais * %s +
                     score_criminalidade * %s
-                ) / %s
+                ) / nullif(
+                    (case when valor_medio_m2 is null then 0.0 else %s end)
+                    + %s + %s + %s,
+                    0
+                )
             ) as score
         from scoreado
         where 1 = 1
@@ -278,11 +286,16 @@ def aplicar_filtros(body: ScoreFiltroIn):
         body.renda_max,
         body.renda_max if body.renda_max is not None else 0.0,
 
+        # Numerador: peso_renda só conta quando há valor_medio_m2 (tratado no SQL).
         peso_renda,
         peso_escolas,
         peso_hospitais,
         peso_criminalidade,
-        soma_pesos,
+        # Denominador: mesma lógica — peso_renda excluído quando não há renda.
+        peso_renda,
+        peso_escolas,
+        peso_hospitais,
+        peso_criminalidade,
     ]
 
     if body.busca:
